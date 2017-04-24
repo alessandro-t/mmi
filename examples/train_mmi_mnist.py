@@ -66,11 +66,17 @@ model.compile_(input_shape, BinaryCrossEntropyLoss(),\
 for epoch in range(200):
     for xb,mb_dim,yb,ib in train.get_minibatches(20, shuffle=True):
         model.train_on_batch(xb,mb_dim,yb,ib)
-    if epoch%5 == 0:
+    if (epoch+1)%5 == 0:
         for xb,mb_dim,yb,ib in train.get_minibatches(200, shuffle=False):
             model.update_metrics(xb, mb_dim, yb, ib)
-        print model.save_merged('train', epoch, True)
+        train_stats = model.save_merged('train', epoch, True)
         for xb,mb_dim,yb,ib in test.get_minibatches(200, shuffle=False):
             model.update_metrics(xb, mb_dim, yb, ib)
-        print model.save_merged('test', epoch, True)
+        test_stats  = model.save_merged('test', epoch, True)
+        print 'End of Epoch %03d' % (epoch + 1)
+        print 'Train - Loss: %.3f Accuracy: %.3f' %\
+              (train_stats['loss'],train_stats['binaryaccuracy'])
+        print 'Test  - Loss: %.3f Accuracy: %.3f' %\
+              (test_stats['loss'],test_stats['binaryaccuracy'])
+        print '-'*35
 model.save_model(epoch+1)

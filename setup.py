@@ -10,8 +10,6 @@ setup(name='mmi',
       download_url='https://github.com/alessandro-t/mmi',
       license='MIT',
       install_requires=['numpy',
-                        'tensorflow',
-                        'scipy'
-                        ],
+                       ],
       package_data={'mmi': ['README.md']},
       packages=find_packages())
