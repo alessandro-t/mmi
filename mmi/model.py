@@ -396,10 +396,10 @@ class Model(object):
              self.add_layer(l)
   
     def _get_segment_indices(self, ids_):
-        head = tf.reverse(tf.add(tf.reduce_max(ids_, axis=0), 1), [0])
-        max_columns = tf.concat([tf.slice(head, [0], [tf.size(head)-1]),[1]], 0)
+        head = tf.reverse(tf.add(tf.reduce_max(ids_, axis=0), 1),[0])
+        max_columns = tf.concat([tf.reverse(tf.slice(head, [0], [tf.size(head)-1]),[0]),[1]],0)
         multipliers = tf.cumprod(max_columns, reverse=True)
-        y, idx = tf.unique(tf.reduce_sum(tf.multiply(ids_, multipliers), axis=1))
+        y,idx = tf.unique(tf.reduce_sum(tf.multiply(ids_, multipliers),axis=1))
         return idx
 
     def _reduce_indices(self, ids_):
