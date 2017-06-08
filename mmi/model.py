@@ -256,7 +256,7 @@ class Convolution2D(Layer):
         else:
             self.kernel_size = [3,3]
         if 'strides' in kwargs:
-            self.strides = [1] + kwargs['strides'] + [1]
+            self.strides = kwargs['strides']
         else:
             self.strides = [1,1,1,1]
         if 'padding' in kwargs:
@@ -306,11 +306,11 @@ class MaxPooling2D(Layer):
     def __init__(self, *args, **kwargs):
 
         if 'kernel_size' in kwargs:
-            self.kernel_size = [1] + kwargs['kernel_size'] + [1]
+            self.kernel_size = kwargs['kernel_size']
         else:
             self.kernel_size = [1,2,2,1]
         if 'strides' in kwargs:
-            self.strides = [1] + kwargs['strides'] + [1]
+            self.strides = kwargs['strides']
         else:
             self.strides = [1,2,2,1]
         if 'padding' in kwargs:
@@ -399,7 +399,7 @@ class Model(object):
         head = tf.reverse(tf.add(tf.reduce_max(ids_, axis=0), 1),[0])
         max_columns = tf.concat([tf.reverse(tf.slice(head, [0], [tf.size(head)-1]),[0]),[1]],0)
         multipliers = tf.cumprod(max_columns, reverse=True)
-        y,idx = tf.unique(tf.reduce_sum(tf.multiply(ids_, multipliers),axis=1))
+        y, idx = tf.unique(tf.reduce_sum(tf.multiply(ids_, multipliers),axis=1))
         return idx
 
     def _reduce_indices(self, ids_):
