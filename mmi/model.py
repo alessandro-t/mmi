@@ -40,6 +40,15 @@ class Layer(object):
         for attrname in vars(self):
             if isinstance(getattr(self, attrname), primitives):
                 json_layer[attrname] = getattr(self, attrname)
+                if attrname == 'strides' and\
+                    json_layer['layer'] == 'MaxPooling2D':
+                    json_layer[attrname] = json_layer[attrname][1:-1]
+                if attrname == 'strides' and\
+                    json_layer['layer'] == 'Convolution2D':
+                    json_layer[attrname] = json_layer[attrname][1:-1]
+                if attrname == 'kernel_size' and\
+                    json_layer['layer'] == 'MaxPooling2D':
+                    json_layer[attrname] = json_layer[attrname][1:-1]
         return json_layer
 
 class Activation(Layer):
@@ -215,6 +224,10 @@ class LinearLayer(Layer):
                 initializer = get_inizializer('he_normal', fan_in, fan_out)
                 self.weights = tf.get_variable('weights', [fan_in, fan_out], initializer=initializer)
                 self.weights = tf.add(self.weights, np.eye(fan_in, fan_out))
+            elif type(self.init_type).__module__ == np.__name__:
+                self.weights = tf.get_variable('weights', [fan_in, fan_out], initializer=tf.constant_initializer(0))
+                self.weights = tf.add(self.weights, self.init_type)
+                
             else:
                 initializer = get_inizializer(self.init_type, fan_in, fan_out)
                 self.weights = tf.get_variable('weights', [fan_in, fan_out], initializer=initializer)
@@ -256,7 +269,7 @@ class Convolution2D(Layer):
         else:
             self.kernel_size = [3,3]
         if 'strides' in kwargs:
-            self.strides = kwargs['strides']
+            self.strides = [1] + kwargs['strides'] + [1]
         else:
             self.strides = [1,1,1,1]
         if 'padding' in kwargs:
@@ -306,11 +319,11 @@ class MaxPooling2D(Layer):
     def __init__(self, *args, **kwargs):
 
         if 'kernel_size' in kwargs:
-            self.kernel_size = kwargs['kernel_size']
+            self.kernel_size = [1] + kwargs['kernel_size'] + [1]
         else:
             self.kernel_size = [1,2,2,1]
         if 'strides' in kwargs:
-            self.strides = kwargs['strides']
+            self.strides = [1] + kwargs['strides'] + [1]
         else:
             self.strides = [1,2,2,1]
         if 'padding' in kwargs:
