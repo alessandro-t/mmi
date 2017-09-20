@@ -1,3 +1,4 @@
+import h5py
 import numpy as np
 import tensorflow as tf
 
@@ -7,6 +8,66 @@ class Dataset(object):
     def get_minibatches(self, mb_size, shuffle=True):
         raise NotImplementedError()
 
+class BasicMMIMnist(Dataset):
+    def __init__(self, path, which_set='train', seed=None):
+        self.seed = seed
+        if seed is not None:
+            np.random.seed(seed)
+        data = h5py.File(path)
+        self.X, self.y = data['%s_features' % which_set][:], data['y_%s' % which_set][:]
+        
+    def create_dataset(self, pos=100, neg=100, max_top_bags=7, max_sub_bags=7):
+        pos_found = 0
+        neg_found = 0
+        top_bags = []
+        top_bags_labels = []
+        while len(top_bags)<pos+neg:
+            n_top_bags = np.random.randint(2,max_top_bags+1)
+            all_index = []
+            for t in range(n_top_bags):
+                is_positive = False
+                sub_bag_labels = np.random.randint(0,10,np.random.randint(2,max_sub_bags+1))
+                sub_bag_index = []
+                for label in sub_bag_labels:
+                    sub_bag_index += [np.random.choice(np.where(self.y == label)[0],1)]
+                sub_bag_index = np.array(sub_bag_index).ravel()
+                if (7 in set(self.y[sub_bag_index])) and (3 not in set(self.y[sub_bag_index])):
+                    is_positive = True
+                all_index += [sub_bag_index]
+                
+            if is_positive and pos_found < pos:
+                top_bags += [all_index]
+                top_bags_labels += [1]
+                pos_found += 1
+                
+            if not is_positive and neg_found < neg:
+                top_bags += [all_index]
+                top_bags_labels += [0]
+                pos_found += 1
+        self.tb_index = np.array(top_bags)
+        self.tb_labels = np.array(top_bags_labels)
+        
+    def get_minibatches(self, mb_size, shuffle=True):
+        indices = np.arange(len(self.tb_index))
+        if shuffle:
+            np.random.shuffle(indices)
+        n_batches = np.ceil(1.*len(indices)/mb_size).astype(np.int32)
+        for b in range(n_batches):
+            left_i  = b*mb_size
+            right_i = min((b+1)*mb_size, len(indices))
+            current_indices = indices[left_i:right_i]
+            current_bags = self.tb_index[current_indices]
+            segment_ids = []
+            index = []
+            for i,tb in enumerate(current_bags):
+                for j,sb in enumerate(tb):
+                    for k, ib in enumerate(sb):
+                        segment_ids += [[i,j]]
+                        index += [ib]
+            index = np.array(index)
+            segment_ids = np.array(segment_ids)
+            yield self.X[index], right_i-left_i, self.tb_labels[current_indices], segment_ids
+            
 class MMIMNIST(Dataset):
     def __init__(self, X, y, mode='standard', seed=None):
         self.X = X[:,:,:,None]

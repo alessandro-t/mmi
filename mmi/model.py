@@ -4,6 +4,7 @@ import numpy as np
 import time
 import os
 
+from tensorflow.contrib.rnn import BasicLSTMCell, LSTMCell, DropoutWrapper
 from mmi.loss import Regularizer
 
 primitives = (bool, str, int, float, list, dict)
@@ -193,6 +194,131 @@ class BagLayerSum(Activation):
         self.activation_ = tf.segment_sum(input_, lengths)
         return self.activation_
 
+
+class LSTMLayer(Layer):
+    def __init__(self, *args, **kwargs):
+        super(LSTMLayer, self).__init__()
+
+        assert (len(args) == 1) != ('units' in kwargs)
+        if len(args) == 1:
+            self.units = args[0]
+        else:
+            self.units = kwargs['units'] + (kwargs['units']%2)
+        if 'init_type' in kwargs:
+            self.init_type = kwargs['init_type']
+        else:
+            self.init_type = 'he_normal'
+
+        if 'keep_proba' in kwargs:
+            self.keep_proba = kwargs['keep_proba']
+        else:
+            self.keep_proba = 1.0
+
+        self.reduce_length = False
+
+    def build(self, *args, **kwargs):
+        assert len(args) == 3
+        self.name = args[0]
+        self.input_shape = args[1]
+        self.output_shape = self.input_shape[:-1] + [self.units]
+        input_ = args[2]
+        lengths = kwargs['lengths']
+        is_training = kwargs['is_training']
+
+
+        fan_in = self.input_shape[-1]
+        fan_out = self.output_shape[-1]
+
+        with tf.variable_scope(self.name):
+            self.rnn_cell = LSTMCell(fan_out//2)
+
+        return self.activation(input_, lengths, is_training)
+
+    def activation(self, input_, lengths, is_training):
+        max_  = tf.reduce_max(self.sequence_length(lengths))
+        index = tf.cumsum(self.sequence_length(lengths))
+        start = tf.multiply(max_,0)
+        end   = tf.gather(index, 0)
+        seq   = tf.gather(tf.zeros_like(input_),tf.range(tf.size(input_),tf.size(input_)))
+
+        padded_input = tf.while_loop(self.condition, self.body_padding, [input_, index, seq, start, end, max_])
+        padded_input = tf.reshape(padded_input[2], (-1,max_,self.input_shape[-1]))
+
+        keep_proba = tf.cond(is_training, lambda:self.keep_proba, lambda:1.0)
+        # self.output_rnn, self.state_rnn = tf.nn.dynamic_rnn(
+        #     DropoutWrapper(self.rnn_cell, output_keep_prob=keep_proba),
+        #     padded_input,
+        #     dtype=tf.float32,
+        #     sequence_length=self.sequence_length(lengths),
+        #     scope='dyn_' + self.name
+        # )
+        self.output_rnn, self.state_rnn = tf.nn.bidirectional_dynamic_rnn(
+            DropoutWrapper(self.rnn_cell, output_keep_prob=keep_proba),
+            DropoutWrapper(self.rnn_cell, output_keep_prob=keep_proba),
+            padded_input,
+            dtype=tf.float32,
+            sequence_length=self.sequence_length(lengths),
+            scope='dyn_' + self.name
+        )
+
+        output_rnn = tf.reshape(self.output_rnn, [-1, self.output_shape[-1]])
+        index = self.sequence_length(lengths)
+        start = tf.multiply(max_,0)
+        end   = tf.gather(index,0)
+        seq   = tf.gather(tf.zeros_like(output_rnn),tf.range(tf.size(output_rnn),tf.size(output_rnn)))
+        remove_padding = tf.while_loop(self.condition, self.body_remove_padding, [output_rnn, index, seq, start, end, max_])
+        self.activation_ = remove_padding[2]
+
+        return self.activation_
+
+
+    def body_padding(self, data, index, seq, start, end, max_):
+        curr_slice = tf.gather(data, tf.range(start, end))
+        curr_slice = tf.pad(curr_slice, [[0, max_-tf.gather(tf.shape(curr_slice),0)], [0, 0]], "CONSTANT")
+        seq = tf.concat([seq, curr_slice],0)
+        start = end
+        index = tf.gather(index, tf.range(1,tf.size(index)))
+        end = tf.cond(tf.greater(tf.size(index), 0), lambda:tf.gather(index,0), lambda:0)
+        return data,index,seq,start,end,max_
+
+    def body_remove_padding(self, data, index, seq, start, end, max_):
+        curr_slice = tf.gather(data, tf.range(start,end))
+        seq = tf.concat([seq, curr_slice],0)
+        start += max_
+        index = tf.gather(index, tf.range(1,tf.size(index)))
+        end = tf.cond(tf.greater(tf.size(index), 0), lambda:tf.gather(index,0), lambda:0)
+        end += start
+        return data,index,seq,start,end,max_
+
+    def condition(self, data, index, seq, start, end, max_):
+        return tf.greater(tf.size(index), 0)
+
+    def sequence_length(self, lengths):
+
+        # try:
+        final_idx = tf.segment_sum(tf.ones_like(lengths), lengths)
+        # except:
+            # final_idx = tf.segment_sum(tf.ones_like(self.get_index(lengths)), self.get_index(lengths))
+        return final_idx
+
+    def get_index(self, lengths):
+        head = tf.reverse(tf.add(tf.reduce_max(lengths, axis=0), 1),[0])
+        max_columns = tf.concat([tf.reverse(tf.slice(head, [0], [tf.size(head)-1]),[0]),[1]],0)
+        multipliers = tf.cumprod(max_columns, reverse=True)
+        y, idx = tf.unique(tf.reduce_sum(tf.multiply(lengths, multipliers), axis=1))
+        return idx
+
+        # final_idx = tf.cond(tf.equal(tf.gather(tf.shape(lengths), tf.rank(lengths)-1),1),\
+        #     lambda: idx, lambda: tf.segment_sum(tf.ones_like(idx), idx))
+        # return final_idx
+    
+    def get_summaries(self): 
+        # return [self.summary_weights, self.summary_bias]
+        return []
+    
+    def get_activation(self):
+        return self.activation_
+
 class LinearLayer(Layer):
     def __init__(self, *args, **kwargs):
         super(LinearLayer, self).__init__()
@@ -220,13 +346,13 @@ class LinearLayer(Layer):
         fan_out = self.output_shape[-1]
 
         with tf.variable_scope(self.name):
-            if self.init_type == 'identity':
+            if type(self.init_type).__module__ == np.__name__:
+                self.weights = tf.get_variable('weights', [fan_in, fan_out], initializer=tf.constant_initializer(self.init_type))
+#                self.weights = tf.add(self.weights, self.init_type)
+            elif self.init_type == 'identity':
                 initializer = get_inizializer('he_normal', fan_in, fan_out)
                 self.weights = tf.get_variable('weights', [fan_in, fan_out], initializer=initializer)
                 self.weights = tf.add(self.weights, np.eye(fan_in, fan_out))
-            elif type(self.init_type).__module__ == np.__name__:
-                self.weights = tf.get_variable('weights', [fan_in, fan_out], initializer=tf.constant_initializer(0))
-                self.weights = tf.add(self.weights, self.init_type)
                 
             else:
                 initializer = get_inizializer(self.init_type, fan_in, fan_out)
@@ -296,9 +422,13 @@ class Convolution2D(Layer):
         self.output_shape = [out_height, out_width, self.output_channels]
         self.input_channels = self.input_shape[-1]
 
-        is_uniform = self.init_type == 'he_uniform'
         with tf.variable_scope(self.name):
-            self.weights = tf.get_variable('weights', self.kernel_size + [self.input_channels, self.output_channels], initializer=tf.contrib.layers.xavier_initializer_conv2d(uniform=is_uniform))
+            if type(self.init_type).__module__ == np.__name__:
+                self.weights = tf.get_variable('weights', self.kernel_size + [self.input_channels, self.output_channels], initializer=tf.constant_initializer(self.init_type))
+#                self.weights = tf.add(self.weights, self.init_type)
+            else:
+                is_uniform = self.init_type == 'he_uniform'
+                self.weights = tf.get_variable('weights', self.kernel_size + [self.input_channels, self.output_channels], initializer=tf.contrib.layers.xavier_initializer_conv2d(uniform=is_uniform))
             self.bias    = tf.get_variable('bias', [self.output_channels], initializer=tf.constant_initializer(0.0, dtype=tf.float32))
             self.summary_weights = tf.summary.histogram(self.name + '/weights', self.weights)
             self.summary_bias = tf.summary.histogram(self.name + '/bias', self.bias)
@@ -307,6 +437,10 @@ class Convolution2D(Layer):
     def activation(self, input_):
         # Compute convolution conv -> relu -> pooling -> dropout
         self.activation_ = conv2d(input_, self.weights, strides=self.strides, padding=self.padding) + self.bias
+        return self.activation_
+    def activation2(self, input_,w,b):
+        # Compute convolution conv -> relu -> pooling -> dropout
+        self.activation_ = conv2d(input_, w, strides=self.strides, padding=self.padding) + b
         return self.activation_
 
     def get_summaries(self):
@@ -444,7 +578,9 @@ class Model(object):
             output_shape = shapes['x']['shape']
     
             lengths = self.segment_ids
-            segment_indices = lengths
+            # segment_indices = lengths
+            segment_indices = self._get_segment_indices(lengths)
+
     
             summaries = []
             layer_names = {}
@@ -454,13 +590,14 @@ class Model(object):
                     layer_names[layer_name] = 1
                 layer_names[layer_name] += 1
                 layer_name += '%d' % (layer_names[layer_name]-1)
-    
                 if layer.reduce_length:
-                    segment_indices = self._get_segment_indices(lengths)
+                    # segment_indices = self._get_segment_indices(lengths)
                     reduced_ids = self._reduce_indices(lengths)
                     lengths = tf.segment_max(reduced_ids, segment_indices)
-                
+
                 outputs = layer.build(layer_name, output_shape, outputs, lengths=segment_indices, is_training=self.is_training)
+                if layer.reduce_length:
+                    segment_indices = self._get_segment_indices(lengths)
                 output_shape = layer.output_shape
                 summaries += layer.get_summaries()
     
@@ -514,7 +651,7 @@ class Model(object):
                     self.train_step = tf.train.AdadeltaOptimizer(learning_rate).minimize(self.loss_function)
                 if optimizer == 'adam':
                     self.train_step = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)    
-            self.saver = tf.train.Saver(max_to_keep=None)
+            self.saver = tf.train.Saver(max_to_keep=1000)
 #            config = tf.ConfigProto(
 #                device_count = {'GPU': 0}
 #            )      
@@ -526,52 +663,59 @@ class Model(object):
             self.sess = sess
 
     def restore(self, path):
-        self.saver = tf.train.import_meta_graph(path)
-        self.saver.restore(self.sess, tf.train.latest_checkpoint('/'.join(path.split('/')[:-1])))
+        with self.graph.as_default():
+            self.saver = tf.train.import_meta_graph(path +'.meta')
+        #self.saver.restore(self.sess, path)
+            self.saver.restore(self.sess, tf.train.latest_checkpoint('/'.join(path.split('/')[:-1])))
 
     def train_on_batch(self, xb, mb_dim, yb, ib):
         # Training placeholder
-        sess = self.sess
-        x = self.inputs
-        y = self.targets
-        segment_ids = self.segment_ids
-        is_training = self.is_training
-        self.train_step.run(session=sess, feed_dict={x: xb, segment_ids:ib, y:yb, is_training:True})
+        with self.graph.as_default():
+            sess = self.sess
+            x = self.inputs
+            y = self.targets
+            segment_ids = self.segment_ids
+            is_training = self.is_training
+            self.train_step.run(session=sess, feed_dict={x: xb, segment_ids:ib, y:yb, is_training:True})
 
     def save_model(self, epoch):
-        save_path = self.saver.save(self.sess, '%s/model%d.ckpt' % (self.debug_folder, epoch+1))
+        with self.graph.as_default():
+            save_path = self.saver.save(self.sess, '%s/model' % (self.debug_folder),global_step=(epoch+1))
+            print(save_path)
 
     def save_merged(self, name, epoch, verbose=False):
-        writer = tf.summary.FileWriter('%s/%s' % (self.debug_folder, name))
-        writer.add_summary(self.sess.run(self.merged, feed_dict={}), epoch)
+        with self.graph.as_default():
+            writer = tf.summary.FileWriter('%s/%s' % (self.debug_folder, name))
+            writer.add_summary(self.sess.run(self.merged, feed_dict={}), epoch)
 
-        loss_value = self.loss(self.sess)
-        callback_values = []
+            loss_value = self.loss(self.sess)
+            callback_values = []
 
-        feed_dict={self.loss.placeholder: loss_value}
-        for callback in self.callbacks:
-            value = callback(self.sess)
-            feed_dict[callback.placeholder] = value
-            callback_values.append([callback.name, value])
-
-        res = self.sess.run(self.merged_callbacks, feed_dict)
-        writer.add_summary(res, epoch)
-        writer.close()
-        if verbose:
-           ret_dict = {'loss': loss_value}
-           for c in callback_values:
-               ret_dict[c[0]] = c[1]
-           return ret_dict          
+            feed_dict={self.loss.placeholder: loss_value}
+            for callback in self.callbacks:
+                value = callback(self.sess)
+                feed_dict[callback.placeholder] = value
+                callback_values.append([callback.name, value])
+    
+            res = self.sess.run(self.merged_callbacks, feed_dict)
+            writer.add_summary(res, epoch)
+            writer.close()
+            if verbose:
+               ret_dict = {'loss': loss_value}
+               for c in callback_values:
+                   ret_dict[c[0]] = c[1]
+               return ret_dict          
  
     def update_metrics(self, xb, mb_dim, yb, ib):
-        sess = self.sess
-        x = self.inputs
-        y = self.targets
-        segment_ids = self.segment_ids
-        is_training = self.is_training
-
-        feed_dict={x: xb, segment_ids:ib, y:yb, is_training:False}
-        self.loss.update(sess, mb_dim, feed_dict)
-
-        for callback in self.callbacks:
-            callback.update(sess, feed_dict)
+        with self.graph.as_default():
+            sess = self.sess
+            x = self.inputs
+            y = self.targets
+            segment_ids = self.segment_ids
+            is_training = self.is_training
+    
+            feed_dict={x: xb, segment_ids:ib, y:yb, is_training:False}
+            self.loss.update(sess, mb_dim, feed_dict)
+    
+            for callback in self.callbacks:
+                callback.update(sess, feed_dict)

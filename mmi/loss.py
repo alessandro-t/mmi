@@ -19,34 +19,33 @@ class TensorFunction(object):
 
 class Regularizer(TensorFunction):
 	def build(self, *args, **kwargs):
-            raise NotImplementedError() 
+		raise NotImplementedError() 
 
 class L1Regularizer(Regularizer):
-        def __init__(self, scale):
-            self.scale = scale
-
+	def __init__(self, scale):
+		self.scale = scale
 	def build(self, *args, **kwargs):
-                super(L1Regularizer, self)             
+		super(L1Regularizer, self)             
 		assert 'layers' in kwargs# and 'scale' in kwargs
-                all_weights = []
+		all_weights = []
 		for layer in kwargs['layers']:
-                	if hasattr(layer, 'weights'):
-                		all_weights += [tf.reshape(layer.weights, [-1])]
+			if hasattr(layer, 'weights'):
+				all_weights += [tf.reshape(layer.weights, [-1])]
 		all_weights = tf.concat(all_weights, axis=0)
 
 		self.tf_function = self.scale*tf.reduce_sum(tf.abs(all_weights))
 
 class L2Regularizer(Regularizer):
-        def __init__(self, scale):
-            self.scale = scale
+	def __init__(self, scale):
+		self.scale = scale
 
 	def build(self, *args, **kwargs):
-                super(L2Regularizer, self)             
+		super(L2Regularizer, self)             
 		assert 'layers' in kwargs# and 'scale' in kwargs
-                all_weights = []
+		all_weights = []
 		for layer in kwargs['layers']:
-                	if hasattr(layer, 'weights'):
-                		all_weights += [tf.reshape(layer.weights, [-1])]
+			if hasattr(layer, 'weights'):
+				all_weights += [tf.reshape(layer.weights, [-1])]
 		all_weights = tf.concat(all_weights, axis=0)
 
 		self.tf_function = self.scale*tf.reduce_sum(all_weights**2)
@@ -63,14 +62,14 @@ class BinaryCrossEntropyLoss(TensorFunction):
 		self.length += mb_dim
 
 	def build(self, *args, **kwargs):
-                super(BinaryCrossEntropyLoss, self).make()             
+		super(BinaryCrossEntropyLoss, self).make()             
 		assert 'labels' in kwargs and 'logits' in kwargs
 		self.accumulator = 0
 		self.length = 0
 		labels, logits = tf.reshape(kwargs['labels'],[-1]), tf.reshape(kwargs['logits'], [-1])
-                loss = tf.maximum(logits, 0) - logits*labels + tf.log(1 + tf.exp(-tf.abs(logits)))
-                #loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.reshape(labels,[-1]), logits=tf.reshape(logits,[-1]))
-                #loss = tf.nn.weighted_cross_entropy_with_logits(labels, logits, 3.22)
+		loss = tf.maximum(logits, 0) - logits*labels + tf.log(1 + tf.exp(-tf.abs(logits)))
+		#loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.reshape(labels,[-1]), logits=tf.reshape(logits,[-1]))
+		#loss = tf.nn.weighted_cross_entropy_with_logits(labels, logits, 3.22)
 		self.tf_function = tf.reduce_mean(loss)
 
 	def reset_accumulator(self, session):
@@ -113,7 +112,7 @@ class BinaryAccuracy(TensorFunction):
 		session.run([self.update_op_acc], feed_dict)
 
 	def build(self, *args, **kwargs):
-                super(BinaryAccuracy, self).make()             
+		super(BinaryAccuracy, self).make()             
 		assert 'labels' in kwargs and 'logits' in kwargs
 		labels, logits = kwargs['labels'], kwargs['logits']
 
