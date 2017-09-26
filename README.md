@@ -19,7 +19,7 @@ pip install mmi
 ```
 
 ## Run the demo
-Enter `examples` folder and run
+Enter `example_mnist` folder and run
 ```bash
 python train_mmi_mnist.py
 ```
