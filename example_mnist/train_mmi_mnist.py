@@ -73,10 +73,10 @@ for epoch in range(200):
         for xb,mb_dim,yb,ib in test.get_minibatches(200, shuffle=False):
             model.update_metrics(xb, mb_dim, yb, ib)
         test_stats  = model.save_merged('test', epoch, True)
-        print 'End of Epoch %03d' % (epoch + 1)
-        print 'Train - Loss: %.3f Accuracy: %.3f' %\
-              (train_stats['loss'],train_stats['binaryaccuracy'])
-        print 'Test  - Loss: %.3f Accuracy: %.3f' %\
-              (test_stats['loss'],test_stats['binaryaccuracy'])
-        print '-'*35
+        print('End of Epoch %03d' % (epoch + 1))
+        print('Train - Loss: %.3f Accuracy: %.3f' %\
+              (train_stats['loss'],train_stats['binaryaccuracy']))
+        print('Test  - Loss: %.3f Accuracy: %.3f' %\
+              (test_stats['loss'],test_stats['binaryaccuracy']))
+        print('-'*35)
 model.save_model(epoch+1)
